@@ -1,3 +1,5 @@
+# Compressed Long Short-Term Memory
+
 # Based on LSTMCell and LSTM layer from Keras version 2.2.4
 # https://github.com/keras-team/keras/blob/2.2.4/keras/layers/recurrent.py
 
@@ -11,11 +13,12 @@ from keras.layers.recurrent import _generate_dropout_mask, RNN
 from keras.legacy import interfaces
 
 
-class LSTMCell(Layer):
-    """Cell class for the LSTM layer.
+class CLSTMCell(Layer):
+    """Cell class for the Compressed LSTM layer based on keras LSTM.
 
     # Arguments
         units: Positive integer, dimensionality of the output space.
+        rank: Positive integer, dimensionality of the compressed output space.
         activation: Activation function to use
             (see [activations](../activations.md)).
             Default: hyperbolic tangent (`tanh`).
@@ -72,7 +75,7 @@ class LSTMCell(Layer):
             for different applications.
     """
 
-    def __init__(self, units,
+    def __init__(self, units, rank,
                  activation='tanh',
                  recurrent_activation='hard_sigmoid',
                  use_bias=True,
@@ -90,8 +93,9 @@ class LSTMCell(Layer):
                  recurrent_dropout=0.,
                  implementation=1,
                  **kwargs):
-        super(LSTMCell, self).__init__(**kwargs)
+        super(CLSTMCell, self).__init__(**kwargs)
         self.units = units
+        self.rank = rank
         self.activation = activations.get(activation)
         self.recurrent_activation = activations.get(recurrent_activation)
         self.use_bias = use_bias
@@ -112,8 +116,8 @@ class LSTMCell(Layer):
         self.dropout = min(1., max(0., dropout))
         self.recurrent_dropout = min(1., max(0., recurrent_dropout))
         self.implementation = implementation
-        self.state_size = (self.units, self.units)
-        self.output_size = self.units
+        self.state_size = (self.rank, self.units)
+        self.output_size = self.rank
         self._dropout_mask = None
         self._recurrent_dropout_mask = None
 
@@ -124,8 +128,13 @@ class LSTMCell(Layer):
                                       initializer=self.kernel_initializer,
                                       regularizer=self.kernel_regularizer,
                                       constraint=self.kernel_constraint)
+        self.projection = self.add_weight(
+            shape=(self.units, self.rank),
+            name='projection',
+            initializer=self.recurrent_initializer
+        )
         self.recurrent_kernel = self.add_weight(
-            shape=(self.units, self.units * 4),
+            shape=(self.rank, self.units * 4),
             name='recurrent_kernel',
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
@@ -256,6 +265,10 @@ class LSTMCell(Layer):
             o = self.recurrent_activation(z3)
 
         h = o * self.activation(c)
+
+        # Adding projeciton
+        h = K.dot(h, self.projection)
+
         if 0 < self.dropout + self.recurrent_dropout:
             if training is None:
                 h._uses_learning_phase = True
@@ -263,6 +276,7 @@ class LSTMCell(Layer):
 
     def get_config(self):
         config = {'units': self.units,
+                  'rank': self.rank,
                   'activation': activations.serialize(self.activation),
                   'recurrent_activation':
                       activations.serialize(self.recurrent_activation),
@@ -285,15 +299,16 @@ class LSTMCell(Layer):
                   'dropout': self.dropout,
                   'recurrent_dropout': self.recurrent_dropout,
                   'implementation': self.implementation}
-        base_config = super(LSTMCell, self).get_config()
+        base_config = super(CLSTMCell, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
 
-class LSTM(RNN):
+class CLSTM(RNN):
     """Long Short-Term Memory layer - Hochreiter 1997.
 
     # Arguments
         units: Positive integer, dimensionality of the output space.
+        rank: Positive integer, dimensionality of the compressed output space.
         activation: Activation function to use
             (see [activations](../activations.md)).
             Default: hyperbolic tangent (`tanh`).
@@ -380,7 +395,7 @@ class LSTM(RNN):
     """
 
     @interfaces.legacy_recurrent_support
-    def __init__(self, units,
+    def __init__(self, units, rank,
                  activation='tanh',
                  recurrent_activation='hard_sigmoid',
                  use_bias=True,
@@ -417,36 +432,37 @@ class LSTM(RNN):
             dropout = 0.
             recurrent_dropout = 0.
 
-        cell = LSTMCell(units,
-                        activation=activation,
-                        recurrent_activation=recurrent_activation,
-                        use_bias=use_bias,
-                        kernel_initializer=kernel_initializer,
-                        recurrent_initializer=recurrent_initializer,
-                        unit_forget_bias=unit_forget_bias,
-                        bias_initializer=bias_initializer,
-                        kernel_regularizer=kernel_regularizer,
-                        recurrent_regularizer=recurrent_regularizer,
-                        bias_regularizer=bias_regularizer,
-                        kernel_constraint=kernel_constraint,
-                        recurrent_constraint=recurrent_constraint,
-                        bias_constraint=bias_constraint,
-                        dropout=dropout,
-                        recurrent_dropout=recurrent_dropout,
-                        implementation=implementation)
-        super(LSTM, self).__init__(cell,
-                                   return_sequences=return_sequences,
-                                   return_state=return_state,
-                                   go_backwards=go_backwards,
-                                   stateful=stateful,
-                                   unroll=unroll,
-                                   **kwargs)
+        cell = CLSTMCell(units,
+                         rank,
+                         activation=activation,
+                         recurrent_activation=recurrent_activation,
+                         use_bias=use_bias,
+                         kernel_initializer=kernel_initializer,
+                         recurrent_initializer=recurrent_initializer,
+                         unit_forget_bias=unit_forget_bias,
+                         bias_initializer=bias_initializer,
+                         kernel_regularizer=kernel_regularizer,
+                         recurrent_regularizer=recurrent_regularizer,
+                         bias_regularizer=bias_regularizer,
+                         kernel_constraint=kernel_constraint,
+                         recurrent_constraint=recurrent_constraint,
+                         bias_constraint=bias_constraint,
+                         dropout=dropout,
+                         recurrent_dropout=recurrent_dropout,
+                         implementation=implementation)
+        super(CLSTM, self).__init__(cell,
+                                    return_sequences=return_sequences,
+                                    return_state=return_state,
+                                    go_backwards=go_backwards,
+                                    stateful=stateful,
+                                    unroll=unroll,
+                                    **kwargs)
         self.activity_regularizer = regularizers.get(activity_regularizer)
 
     def call(self, inputs, mask=None, training=None, initial_state=None):
         self.cell._dropout_mask = None
         self.cell._recurrent_dropout_mask = None
-        return super(LSTM, self).call(inputs,
+        return super(CLSTM, self).call(inputs,
                                       mask=mask,
                                       training=training,
                                       initial_state=initial_state)
@@ -454,6 +470,10 @@ class LSTM(RNN):
     @property
     def units(self):
         return self.cell.units
+
+    @property
+    def rank(self):
+        return self.cell.rank
 
     @property
     def activation(self):
@@ -521,6 +541,7 @@ class LSTM(RNN):
 
     def get_config(self):
         config = {'units': self.units,
+                  'rank': self.rank,
                   'activation': activations.serialize(self.activation),
                   'recurrent_activation':
                       activations.serialize(self.recurrent_activation),
@@ -545,7 +566,7 @@ class LSTM(RNN):
                   'dropout': self.dropout,
                   'recurrent_dropout': self.recurrent_dropout,
                   'implementation': self.implementation}
-        base_config = super(LSTM, self).get_config()
+        base_config = super(CLSTM, self).get_config()
         del base_config['cell']
         return dict(list(base_config.items()) + list(config.items()))
 
