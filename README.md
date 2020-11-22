@@ -14,7 +14,7 @@ Our experiments show that the proposed compression method for LSTMs is superior 
 
 ## Requirements
 ```
-pip install numpy Keras==2.2.4
+pip install numpy Keras==2.2.4 tensorflow==1.13.1
 ```
 
 ## Sources
